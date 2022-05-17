@@ -1,6 +1,7 @@
 package logicalplan
 
 import (
+	"fmt"
 	"github.com/apache/arrow/go/v8/arrow/scalar"
 	"reflect"
 	"strings"
@@ -15,10 +16,40 @@ type ExprValidationError struct {
 
 // ExprValidationError.Error implements the error interface.
 func (e *ExprValidationError) Error() string {
-	return e.message
+	message := make([]string, 0)
+	message = append(message, e.message)
+	message = append(message, ": ")
+	message = append(message, fmt.Sprintf("%s", e.expr))
+	for _, child := range e.children {
+		message = append(message, "\ninvalid expression: ")
+		message = append(message, child.Error())
+	}
+
+	return strings.Join(message, "")
 }
 
-// TODO rename thi
+type PlanValidationError struct {
+	message  string
+	plan     *LogicalPlan
+	children []*ExprValidationError
+}
+
+// PlanValidationError.Error implements the error interface.
+func (e *PlanValidationError) Error() string {
+	message := make([]string, 0)
+	message = append(message, e.message)
+	message = append(message, ": ")
+	message = append(message, fmt.Sprintf("%s", e.plan))
+
+	for _, child := range e.children {
+		message = append(message, "\ninvalid expression: ")
+		message = append(message, child.Error())
+		message = append(message, "\n---")
+	}
+
+	return strings.Join(message, "")
+}
+
 type Validator struct {
 	plan *LogicalPlan
 }
@@ -55,7 +86,11 @@ func (v *Validator) Validate() error {
 func (v *Validator) ValidateFilter() error {
 	// TODO something weird happening w/ casting here
 	if err := v.ValidateFilterExpr(v.plan.Filter.Expr); err != nil {
-		return err
+		return &PlanValidationError{
+			message:  "invalid filter",
+			plan:     v.plan,
+			children: []*ExprValidationError{err},
+		}
 	}
 	return nil
 }
