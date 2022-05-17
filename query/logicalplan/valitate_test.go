@@ -1,6 +1,7 @@
 package logicalplan
 
 import (
+	"github.com/polarsignals/arcticdb/dynparquet"
 	"github.com/stretchr/testify/require"
 	"log"
 	"testing"
@@ -18,15 +19,17 @@ func TestFilterBinaryExprLeftSideMustBeColumn(t *testing.T) {
 		}).
 		Build()
 
-	err := Validate(plan)
+	validator := &LogicalPlanValidator{plan}
+	err := validator.Validate()
 	require.NotNil(t, err)
 }
 
 func TestFilterAndExprEvaluatesEachAndedRule(t *testing.T) {
 	plan := (&Builder{}).
+		Scan(&mockTableProvider{dynparquet.NewSampleSchema()}, "table1").
 		Filter(And(
 			BinaryExpr{
-				Left:  Col("a"),
+				Left:  Col("example_type"),
 				Op:    EqOp,
 				Right: Literal("b"),
 			},
@@ -38,7 +41,8 @@ func TestFilterAndExprEvaluatesEachAndedRule(t *testing.T) {
 		)).
 		Build()
 
-	err := Validate(plan)
+	validator := &LogicalPlanValidator{plan}
+	err := validator.Validate()
 	log.Printf("%v", err) // TODO remove this
 	require.Nil(t, err)
 }
