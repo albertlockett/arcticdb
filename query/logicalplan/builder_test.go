@@ -8,7 +8,7 @@ import (
 )
 
 func TestLogicalPlanBuilder(t *testing.T) {
-	p := (&Builder{}).
+	p, _ := (&Builder{}).
 		Scan(nil, "table1").
 		Filter(Col("labels.test").Eq(Literal("abc"))).
 		Aggregate(
@@ -52,7 +52,7 @@ func TestLogicalPlanBuilder(t *testing.T) {
 }
 
 func TestLogicalPlanBuilderWithoutProjection(t *testing.T) {
-	p := (&Builder{}).
+	p, _ := (&Builder{}).
 		Scan(nil, "table1").
 		Distinct(Col("labels.test")).
 		Build()

@@ -135,10 +135,9 @@ func (b Builder) Aggregate(
 	}
 }
 
-func (b Builder) Build() *LogicalPlan {
-	return b.plan
-	//if err := Validate(b.plan); err != nil {
-	//	return nil, err
-	//}
-	//return b.plan, nil
+func (b Builder) Build() (*LogicalPlan, error) {
+	if err := NewValidator(b.plan).Validate(); err != nil {
+		return nil, err
+	}
+	return b.plan, nil
 }

@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/memory"
 
@@ -90,10 +89,7 @@ func (b LocalQueryBuilder) Project(
 }
 
 func (b LocalQueryBuilder) Execute(ctx context.Context, callback func(r arrow.Record) error) error {
-	logicalPlan := b.planBuilder.Build()
-
-	validator := logicalplan.NewValidator(logicalPlan)
-	err := validator.Validate()
+	logicalPlan, err := b.planBuilder.Build()
 	if err != nil {
 		return err
 	}

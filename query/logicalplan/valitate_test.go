@@ -3,15 +3,14 @@ package logicalplan
 import (
 	"github.com/polarsignals/arcticdb/dynparquet"
 	"github.com/stretchr/testify/require"
-	"log"
 	"testing"
 )
 
 // TODO rename this file it's spelled wrong
-// TODO check if this should even be a rule
+// TODO clean up the assertions a bit
 
 func TestFilterBinaryExprLeftSideMustBeColumn(t *testing.T) {
-	plan := (&Builder{}).
+	_, err := (&Builder{}).
 		Filter(BinaryExpr{
 			Left:  Literal("a"),
 			Op:    EqOp,
@@ -19,13 +18,11 @@ func TestFilterBinaryExprLeftSideMustBeColumn(t *testing.T) {
 		}).
 		Build()
 
-	validator := &LogicalPlanValidator{plan}
-	err := validator.Validate()
 	require.NotNil(t, err)
 }
 
 func TestFilterAndExprEvaluatesEachAndedRule(t *testing.T) {
-	plan := (&Builder{}).
+	_, err := (&Builder{}).
 		Scan(&mockTableProvider{dynparquet.NewSampleSchema()}, "table1").
 		Filter(And(
 			BinaryExpr{
@@ -41,8 +38,5 @@ func TestFilterAndExprEvaluatesEachAndedRule(t *testing.T) {
 		)).
 		Build()
 
-	validator := &LogicalPlanValidator{plan}
-	err := validator.Validate()
-	log.Printf("%v", err) // TODO remove this
-	require.Nil(t, err)
+	require.NotNil(t, err)
 }
