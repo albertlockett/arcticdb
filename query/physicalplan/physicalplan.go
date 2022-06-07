@@ -146,6 +146,12 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 			phyPlan = Distinct(pool, matchers)
 		case plan.Filter != nil:
 			phyPlan, err = Filter(pool, plan.Filter.Expr)
+		case plan.Exchange != nil:
+			var exchange *ExchangeOperator
+			exchange, err = Exchange(plan.Exchange)
+			phyPlan = exchange
+			finisher = exchange.Finish
+
 		case plan.Aggregation != nil:
 			var agg *HashAggregate
 			agg, err = Aggregate(pool, s, plan.Aggregation)

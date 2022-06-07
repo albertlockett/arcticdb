@@ -25,6 +25,7 @@ type LogicalPlan struct {
 	Distinct    *Distinct
 	Projection  *Projection
 	Aggregation *Aggregation
+	Exchange    *Exchange
 }
 
 func (plan *LogicalPlan) String() string {
@@ -234,4 +235,13 @@ type Aggregation struct {
 
 func (a *Aggregation) String() string {
 	return "Aggregation " + fmt.Sprint(a.AggExpr) + " Group: " + fmt.Sprint(a.GroupExprs)
+}
+
+type Exchange struct {
+	Parallelism  int
+	BackPressure int
+}
+
+func (e *Exchange) String() string {
+	return "Exchange"
 }
