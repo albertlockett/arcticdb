@@ -1,5 +1,9 @@
 package logicalplan
 
+import (
+	"runtime"
+)
+
 type Optimizer interface {
 	Optimize(plan *LogicalPlan) *LogicalPlan
 }
@@ -170,10 +174,14 @@ func (p *FilterExchange) Optimize(plan *LogicalPlan) *LogicalPlan {
 
 func (p *FilterExchange) optimize(plan *LogicalPlan, exprs []Expr) {
 	if plan.Filter != nil {
+		numWorkers := runtime.NumCPU() - 1
+		if numWorkers <= 0 {
+			numWorkers = 1
+		}
 		exchangePlan := LogicalPlan{
 			Exchange: &Exchange{
-				Parallelism:  2, // TODO magic numbers
-				BackPressure: 3,
+				Parallelism:  numWorkers,
+				BackPressure: numWorkers * 2, // TODO profile the right number for backpressure
 			},
 			Input: plan.Input,
 		}

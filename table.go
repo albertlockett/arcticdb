@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
@@ -315,6 +316,47 @@ func (t *Table) Iterator(
 		return err
 	}
 
+	// convert the rowGroups to arrow records in parallel and then send call iterator
+	wg := sync.WaitGroup{}
+	numWorkers := runtime.NumCPU() - 1
+	if numWorkers <= 0 {
+		numWorkers = 1
+	}
+	rgChan := make(chan dynparquet.DynamicRowGroup, numWorkers+5) // TODO find the right number for backpressure
+	var workerErr error
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			for rg := range rgChan {
+				// break if one of our workers got an error
+				if workerErr != nil {
+					break
+				}
+
+				var record arrow.Record
+				record, err = pqarrow.ParquetRowGroupToArrowRecord(
+					ctx,
+					pool,
+					rg,
+					projections,
+					filterExpr,
+					distinctColumns,
+				)
+				if err != nil {
+					workerErr = err
+					break
+				}
+				err = iterator(record)
+				record.Release()
+				if err != nil {
+					workerErr = err
+					break
+				}
+			}
+			wg.Done()
+		}()
+	}
+
 	// Previously we sorted all row groups into a single row group here,
 	// but it turns out that none of the downstream uses actually rely on
 	// the sorting so it's not worth it in the general case. Physical plans
@@ -323,28 +365,18 @@ func (t *Table) Iterator(
 	for _, rg := range rowGroups {
 		select {
 		case <-ctx.Done():
+			close(rgChan)
 			return ctx.Err()
 		default:
-			var record arrow.Record
-			record, err = pqarrow.ParquetRowGroupToArrowRecord(
-				ctx,
-				pool,
-				rg,
-				projections,
-				filterExpr,
-				distinctColumns,
-			)
-			if err != nil {
-				return err
-			}
-			err = iterator(record)
-			record.Release()
-			if err != nil {
-				return err
-			}
+			rgChan <- rg
 		}
 	}
+	close(rgChan)
+	wg.Wait()
 
+	if workerErr != nil {
+		return workerErr
+	}
 	return nil
 }
 
@@ -945,6 +977,9 @@ func (t *TableBlock) Serialize() ([]byte, error) {
 	}
 
 	merged, err := t.table.config.schema.MergeDynamicRowGroups(rowGroups)
+	if err != nil {
+		return nil, err
+	}
 	if err != nil {
 		return nil, err
 	}

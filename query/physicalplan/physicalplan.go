@@ -150,14 +150,26 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 			var exchange *ExchangeOperator
 			exchange, err = Exchange(plan.Exchange)
 			phyPlan = exchange
-			finisher = exchange.Finish
+			prevFinisher := finisher
+			finisher = func() error {
+				if err := exchange.Finish(); err != nil {
+					return err
+				}
+				return prevFinisher()
+			}
 
 		case plan.Aggregation != nil:
 			var agg *HashAggregate
 			agg, err = Aggregate(pool, s, plan.Aggregation)
 			phyPlan = agg
 			if agg != nil {
-				finisher = agg.Finish
+				prevFinisher := finisher
+				finisher = func() error {
+					if err := agg.Finish(); err != nil {
+						return err
+					}
+					return prevFinisher()
+				}
 			}
 		default:
 			panic("Unsupported plan")
