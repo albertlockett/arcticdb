@@ -512,9 +512,12 @@ func Test_Table_Concurrency(t *testing.T) {
 			// Wait for our last tx to be marked as complete
 			table.db.Wait(maxTxID.Load())
 
+			m := sync.Mutex{}
 			totalrows := int64(0)
 			err := table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+				m.Lock()
 				totalrows += ar.NumRows()
+				m.Unlock()
 				defer ar.Release()
 
 				return nil
