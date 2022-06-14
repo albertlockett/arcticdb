@@ -317,7 +317,7 @@ func (t *Table) Iterator(
 
 	// convert the rowGroups to arrow records in parallel and then send call iterator
 	wg := sync.WaitGroup{}
-	numWorkers := runtime.NumCPU() * 2
+	numWorkers := runtime.NumCPU()
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
