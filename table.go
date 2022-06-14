@@ -322,53 +322,45 @@ func (t *Table) Iterator(
 		numWorkers = 1
 	}
 
+	handled := 0
 	var workerErr error
 
-	rgChans := make([]chan []dynparquet.DynamicRowGroup, 0)
+	rgChans := make([]chan dynparquet.DynamicRowGroup, 0)
 
 	for i := 0; i < numWorkers; i++ {
-		rgChan := make(chan []dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
+		rgChan := make(chan dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
 		rgChans = append(rgChans, rgChan)
 		wg.Add(1)
-		var tt int64 = 0
-		handled := 0
-
 		go func() {
-			for rgbatch := range rgChan {
+			for rg := range rgChan {
 				handled += 1
-				start := time.Now().UnixMicro()
-				for _, rg := range rgbatch {
-					// break if one of our workers got an error
-					if workerErr != nil {
-						break
-					}
-
-					var record arrow.Record
-					record, err = pqarrow.ParquetRowGroupToArrowRecord(
-						ctx,
-						pool,
-						rg,
-						projections,
-						filterExpr,
-						distinctColumns,
-					)
-
-					if err != nil {
-						workerErr = err
-						break
-					}
-					err = iterator(record)
-					record.Release()
-					if err != nil {
-						workerErr = err
-						break
-					}
+				// break if one of our workers got an error
+				if workerErr != nil {
+					break
 				}
-				end := time.Now().UnixMicro()
-				tt += (end - start)
+
+				var record arrow.Record
+				record, err = pqarrow.ParquetRowGroupToArrowRecord(
+					ctx,
+					pool,
+					rg,
+					projections,
+					filterExpr,
+					distinctColumns,
+				)
+
+				if err != nil {
+					workerErr = err
+					break
+				}
+				err = iterator(record)
+				record.Release()
+				if err != nil {
+					workerErr = err
+					break
+				}
 			}
 			wg.Done()
-			level.Debug(t.logger).Log("batches", handled, "elapsed", tt, "avg", tt/int64(handled))
 		}()
 	}
 
@@ -377,17 +369,7 @@ func (t *Table) Iterator(
 	// the sorting so it's not worth it in the general case. Physical plans
 	// can decide to sort if they need to in order to exploit the
 	// characteristics of sorted data.
-	level.Info(t.logger).Log("row-groups", len(rowGroups))
-
-	//actions := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	batchSize := 100
-	batches := make([][]dynparquet.DynamicRowGroup, 0, (len(rowGroups)+batchSize-1)/batchSize)
-	for batchSize < len(rowGroups) {
-		rowGroups, batches = rowGroups[batchSize:], append(batches, rowGroups[0:batchSize:batchSize])
-	}
-	batches = append(batches, rowGroups)
-
-	for i, rg := range batches {
+	for i, rg := range rowGroups {
 		rgChan := rgChans[i%numWorkers]
 		select {
 		case <-ctx.Done():
