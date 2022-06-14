@@ -379,7 +379,6 @@ func (t *Table) Iterator(
 			rgChan <- rg
 		}
 	}
-	//slog.Printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~` NOW WE WAIT!!! %d / %d", handled, len(rowGroups))
 	for _, rgChan := range rgChans {
 		close(rgChan)
 	}
