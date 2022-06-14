@@ -21,7 +21,6 @@ import (
 	"io"
 	"math"
 	"math/rand"
-	"runtime"
 	"sync"
 	"time"
 	"unsafe"
@@ -315,80 +314,133 @@ func (t *Table) Iterator(
 		return err
 	}
 
+	doBlockIterate(ctx, pool, projections, filterExpr, distinctColumns, iterator, rowGroups, 2)
+
 	// convert the rowGroups to arrow records in parallel and then send call iterator
-	wg := sync.WaitGroup{}
-	numWorkers := runtime.NumCPU()
-	if numWorkers <= 0 {
-		numWorkers = 1
-	}
-
-	handled := 0
-	var workerErr error
-
-	rgChans := make([]chan dynparquet.DynamicRowGroup, 0)
-
-	for i := 0; i < numWorkers; i++ {
-		rgChan := make(chan dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
-		rgChans = append(rgChans, rgChan)
-		wg.Add(1)
-		go func() {
-			for rg := range rgChan {
-				handled += 1
-				// break if one of our workers got an error
-				if workerErr != nil {
-					break
-				}
-
-				var record arrow.Record
-				record, err = pqarrow.ParquetRowGroupToArrowRecord(
-					ctx,
-					pool,
-					rg,
-					projections,
-					filterExpr,
-					distinctColumns,
-				)
-
-				if err != nil {
-					workerErr = err
-					break
-				}
-				err = iterator(record)
-				record.Release()
-				if err != nil {
-					workerErr = err
-					break
-				}
-			}
-			wg.Done()
-		}()
-	}
+	//wg := sync.WaitGroup{}
+	//numWorkers := 1 //runtime.NumCPU()
+	//if numWorkers <= 0 {
+	//	numWorkers = 1
+	//}
+	//
+	//handled := 0
+	//var workerErr error
+	//
+	//rgChans := make([]chan []dynparquet.DynamicRowGroup, 0)
+	//
+	//for i := 0; i < numWorkers; i++ {
+	//	rgChan := make(chan []dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
+	//	rgChans = append(rgChans, rgChan)
+	//	wg.Add(1)
+	//	go func() {
+	//		for batch := range rgChan {
+	//			for _, rg := range batch {
+	//				handled += 1
+	//				// break if one of our workers got an error
+	//				if workerErr != nil {
+	//					break
+	//				}
+	//
+	//				var record arrow.Record
+	//				record, err = pqarrow.ParquetRowGroupToArrowRecord(
+	//					ctx,
+	//					pool,
+	//					rg,
+	//					projections,
+	//					filterExpr,
+	//					distinctColumns,
+	//				)
+	//
+	//				if err != nil {
+	//					workerErr = err
+	//					break
+	//				}
+	//				err = iterator(record)
+	//				record.Release()
+	//				if err != nil {
+	//					workerErr = err
+	//					break
+	//				}
+	//			}
+	//		}
+	//		wg.Done()
+	//	}()
+	//}
 
 	// Previously we sorted all row groups into a single row group here,
 	// but it turns out that none of the downstream uses actually rely on
 	// the sorting so it's not worth it in the general case. Physical plans
 	// can decide to sort if they need to in order to exploit the
 	// characteristics of sorted data.
-	for i, rg := range rowGroups {
-		rgChan := rgChans[i%numWorkers]
-		select {
-		case <-ctx.Done():
-			close(rgChan)
-			return ctx.Err()
-		default:
-			rgChan <- rg
-		}
-	}
-	for _, rgChan := range rgChans {
-		close(rgChan)
-	}
-
-	wg.Wait()
-
-	if workerErr != nil {
-		return workerErr
-	}
+	//batches := chunkSlice(rowGroups, numWorkers*2)
+	//for i, rg := range batches {
+	//	rgChan := rgChans[i%numWorkers]
+	//	select {
+	//	case <-ctx.Done():
+	//		close(rgChan)
+	//		return ctx.Err()
+	//	default:
+	//		rgChan <- rg
+	//	}
+	//}
+	//for _, rgChan := range rgChans {
+	//	close(rgChan)
+	//}
+	//
+	//wg.Wait()
+	//if workerErr != nil {
+	//	return workerErr
+	//}
 	return nil
+}
+
+func doBlockIterate(
+	ctx context.Context,
+	pool memory.Allocator,
+	projections []logicalplan.ColumnMatcher,
+	filterExpr logicalplan.Expr,
+	distinctColumns []logicalplan.ColumnMatcher,
+	iterator func(r arrow.Record) error,
+	rowgroups []dynparquet.DynamicRowGroup,
+	threshold int,
+) {
+	if len(rowgroups) < threshold {
+		for _, rg := range rowgroups {
+			// break if one of our workers got an error
+
+			var record arrow.Record
+			record, _ = pqarrow.ParquetRowGroupToArrowRecord(
+				ctx,
+				pool,
+				rg,
+				projections,
+				filterExpr,
+				distinctColumns,
+			)
+
+			//if err != nil {
+			//	workerErr = err
+			//	break
+			//}
+			_ = iterator(record)
+			record.Release()
+			//if err != nil {
+			//	workerErr = err
+			//	break
+			//}
+		}
+		return
+	}
+
+	half := len(rowgroups) / 2
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		doBlockIterate(ctx, pool, projections, filterExpr, distinctColumns, iterator, rowgroups[:half], threshold)
+		defer wg.Done()
+	}()
+	doBlockIterate(ctx, pool, projections, filterExpr, distinctColumns, iterator, rowgroups[half:], threshold)
+	wg.Wait()
 }
 
 // SchemaIterator iterates in order over all granules in the table and returns
