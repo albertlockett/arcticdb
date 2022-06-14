@@ -1,9 +1,5 @@
 package logicalplan
 
-import (
-	"runtime"
-)
-
 type Optimizer interface {
 	Optimize(plan *LogicalPlan) *LogicalPlan
 }
@@ -13,7 +9,7 @@ var DefaultOptimizers = []Optimizer{
 	&FilterPushDown{},
 	&DistinctPushDown{},
 	&ProjectionPushDown{},
-	&FilterExchange{},
+	//&FilterExchange{},
 }
 
 // The PhysicalProjectionPushDown optimizer tries to push down the actual
@@ -174,7 +170,7 @@ func (p *FilterExchange) Optimize(plan *LogicalPlan) *LogicalPlan {
 
 func (p *FilterExchange) optimize(plan *LogicalPlan, exprs []Expr) {
 	if plan.Filter != nil {
-		numWorkers := runtime.NumCPU() - 1
+		numWorkers := 1 //runtime.NumCPU()
 		if numWorkers <= 0 {
 			numWorkers = 1
 		}

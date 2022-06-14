@@ -5,14 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"math"
-	"math/rand"
-	"runtime"
-	"sync"
-	"time"
-	"unsafe"
-
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/array"
 	"github.com/apache/arrow/go/v8/arrow/memory"
@@ -21,13 +13,20 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/google/btree"
 	"github.com/oklog/ulid"
+	"github.com/polarsignals/arcticdb/pqarrow"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/segmentio/parquet-go"
 	"go.uber.org/atomic"
+	"io"
+	"math"
+	"math/rand"
+	"runtime"
+	"sync"
+	"time"
+	"unsafe"
 
 	"github.com/polarsignals/arcticdb/dynparquet"
-	"github.com/polarsignals/arcticdb/pqarrow"
 	"github.com/polarsignals/arcticdb/query/logicalplan"
 )
 
@@ -318,16 +317,20 @@ func (t *Table) Iterator(
 
 	// convert the rowGroups to arrow records in parallel and then send call iterator
 	wg := sync.WaitGroup{}
-	numWorkers := runtime.NumCPU() - 1
+	numWorkers := runtime.NumCPU() * 2
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
-	rgChan := make(chan dynparquet.DynamicRowGroup, numWorkers+5) // TODO find the right number for backpressure
+	rgChan := make(chan dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
+
+	handled := 0
 	var workerErr error
+
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			for rg := range rgChan {
+				handled += 1
 				// break if one of our workers got an error
 				if workerErr != nil {
 					break
@@ -342,6 +345,7 @@ func (t *Table) Iterator(
 					filterExpr,
 					distinctColumns,
 				)
+
 				if err != nil {
 					workerErr = err
 					break
@@ -371,7 +375,9 @@ func (t *Table) Iterator(
 			rgChan <- rg
 		}
 	}
+	//slog.Printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~` NOW WE WAIT!!! %d / %d", handled, len(rowGroups))
 	close(rgChan)
+
 	wg.Wait()
 
 	if workerErr != nil {
