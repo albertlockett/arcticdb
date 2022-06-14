@@ -321,12 +321,15 @@ func (t *Table) Iterator(
 	if numWorkers <= 0 {
 		numWorkers = 1
 	}
-	rgChan := make(chan dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
 
 	handled := 0
 	var workerErr error
 
+	rgChans := make([]chan dynparquet.DynamicRowGroup, 0)
+
 	for i := 0; i < numWorkers; i++ {
+		rgChan := make(chan dynparquet.DynamicRowGroup, len(rowGroups)*2) // TODO find the right number for backpressure
+		rgChans = append(rgChans, rgChan)
 		wg.Add(1)
 		go func() {
 			for rg := range rgChan {
@@ -366,7 +369,8 @@ func (t *Table) Iterator(
 	// the sorting so it's not worth it in the general case. Physical plans
 	// can decide to sort if they need to in order to exploit the
 	// characteristics of sorted data.
-	for _, rg := range rowGroups {
+	for i, rg := range rowGroups {
+		rgChan := rgChans[i%numWorkers]
 		select {
 		case <-ctx.Done():
 			close(rgChan)
@@ -376,7 +380,9 @@ func (t *Table) Iterator(
 		}
 	}
 	//slog.Printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~` NOW WE WAIT!!! %d / %d", handled, len(rowGroups))
-	close(rgChan)
+	for _, rgChan := range rgChans {
+		close(rgChan)
+	}
 
 	wg.Wait()
 
