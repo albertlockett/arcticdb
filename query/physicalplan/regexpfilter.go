@@ -76,9 +76,10 @@ func BinaryArrayScalarRegexMatch(left *array.Binary, right *regexp.Regexp) (*Bit
 		if left.IsNull(i) {
 			continue
 		}
-		if right.MatchString(string(left.Value(i))) {
-			res.Add(uint32(i))
-		}
+
+		//if right.MatchString(string(left.Value(i))) {
+		res.Add(uint32(i))
+		//}
 	}
 
 	return res, nil

@@ -58,6 +58,10 @@ func (e *OutputPlan) Execute(ctx context.Context, pool memory.Allocator, callbac
 	return e.scan.Execute(ctx, pool)
 }
 
+func (e *OutputPlan) GetScan() ScanPhysicalPlan {
+	return e.scan
+}
+
 type TableScan struct {
 	options  *logicalplan.TableScan
 	next     PhysicalPlan
@@ -82,6 +86,14 @@ func (s *TableScan) Execute(ctx context.Context, pool memory.Allocator) error {
 	}
 
 	return s.finisher()
+}
+
+func (s *TableScan) GetOptions() *logicalplan.TableScan {
+	return s.options
+}
+
+func (s *TableScan) GetNext() PhysicalPlan {
+	return s.next
 }
 
 type SchemaScan struct {
