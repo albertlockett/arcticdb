@@ -59,9 +59,9 @@ func (e *OutputPlan) Execute(ctx context.Context, pool memory.Allocator, callbac
 }
 
 type TableScan struct {
-	options  *logicalplan.TableScan
-	next     PhysicalPlan
-	finisher func() error
+	options     *logicalplan.TableScan
+	nextBuilder func() PhysicalPlan
+	finisher    func() error
 }
 
 func (s *TableScan) Execute(ctx context.Context, pool memory.Allocator) error {
@@ -75,7 +75,10 @@ func (s *TableScan) Execute(ctx context.Context, pool memory.Allocator) error {
 		s.options.Projection,
 		s.options.Filter,
 		s.options.Distinct,
-		s.next.Callback,
+		// TODO change this to return whatever struct table iterator expects
+		func() func(record arrow.Record) error {
+			return s.nextBuilder().Callback
+		},
 	)
 	if err != nil {
 		return err
@@ -85,9 +88,9 @@ func (s *TableScan) Execute(ctx context.Context, pool memory.Allocator) error {
 }
 
 type SchemaScan struct {
-	options  *logicalplan.SchemaScan
-	next     PhysicalPlan
-	finisher func() error
+	options     *logicalplan.SchemaScan
+	nextBuilder func() PhysicalPlan
+	finisher    func() error
 }
 
 func (s *SchemaScan) Execute(ctx context.Context, pool memory.Allocator) error {
@@ -101,7 +104,7 @@ func (s *SchemaScan) Execute(ctx context.Context, pool memory.Allocator) error {
 		s.options.Projection,
 		s.options.Filter,
 		s.options.Distinct,
-		s.next.Callback,
+		s.nextBuilder().Callback,
 	)
 	if err != nil {
 		return err
@@ -114,64 +117,94 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 	outputPlan := &OutputPlan{}
 	var (
 		err      error
-		prev     PhysicalPlan = outputPlan
-		finisher              = func() error { return nil }
+		finisher = func() error { return nil }
 	)
 
+	nextBuilder := planBuilder(pool, s, plan)
 	plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
-		var phyPlan PhysicalPlan
 		switch {
 		case plan.SchemaScan != nil:
 			outputPlan.scan = &SchemaScan{
-				options:  plan.SchemaScan,
-				next:     prev,
-				finisher: finisher,
+				options:     plan.SchemaScan,
+				nextBuilder: nextBuilder,
+				finisher:    finisher,
 			}
 			return false
 		case plan.TableScan != nil:
 			outputPlan.scan = &TableScan{
-				options:  plan.TableScan,
-				next:     prev,
-				finisher: finisher,
+				options:     plan.TableScan,
+				nextBuilder: nextBuilder,
+				finisher:    finisher,
 			}
 			return false
-		case plan.Projection != nil:
-			phyPlan, err = Project(pool, plan.Projection.Exprs)
-		case plan.Distinct != nil:
-			matchers := make([]logicalplan.ColumnMatcher, 0, len(plan.Distinct.Columns))
-			for _, col := range plan.Distinct.Columns {
-				matchers = append(matchers, col.Matcher())
-			}
-
-			phyPlan = Distinct(pool, matchers)
-		case plan.Filter != nil:
-			phyPlan, err = Filter(pool, plan.Filter.Expr)
-
 		case plan.Aggregation != nil:
-			var agg *HashAggregate
-			agg, err = Aggregate(pool, s, plan.Aggregation)
-			phyPlan = agg
-			if agg != nil {
-				prevFinisher := finisher
-				finisher = func() error {
-					if err := agg.Finish(); err != nil {
-						return err
-					}
-					return prevFinisher()
-				}
-			}
+			break
+		case plan.Distinct != nil:
+			break
+		case plan.Filter != nil:
+			break
+		case plan.Projection != nil:
+			break
 		default:
 			panic("Unsupported plan")
 		}
 
-		if err != nil {
-			return false
-		}
-
-		phyPlan.SetNextCallback(prev.Callback)
-		prev = phyPlan
-
 		return true
 	}))
 	return outputPlan, err
+}
+
+// planBuilder TODO a better name & some comments?
+func planBuilder(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) func() PhysicalPlan {
+	return func() PhysicalPlan {
+		var (
+			err      error
+			prev     PhysicalPlan = &OutputPlan{} // ??
+			finisher              = func() error { return nil }
+		)
+		plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
+			var phyPlan PhysicalPlan
+			switch {
+			case plan.SchemaScan != nil:
+				return false
+			case plan.TableScan != nil:
+				return false
+			case plan.Projection != nil:
+				phyPlan, err = Project(pool, plan.Projection.Exprs)
+			case plan.Distinct != nil:
+				matchers := make([]logicalplan.ColumnMatcher, 0, len(plan.Distinct.Columns))
+				for _, col := range plan.Distinct.Columns {
+					matchers = append(matchers, col.Matcher())
+				}
+
+				phyPlan = Distinct(pool, matchers)
+			case plan.Filter != nil:
+				phyPlan, err = Filter(pool, plan.Filter.Expr)
+
+			case plan.Aggregation != nil:
+				var agg *HashAggregate
+				agg, err = Aggregate(pool, s, plan.Aggregation)
+				phyPlan = agg
+				if agg != nil {
+					prevFinisher := finisher
+					finisher = func() error {
+						if err := agg.Finish(); err != nil {
+							return err
+						}
+						return prevFinisher()
+					}
+				}
+			default:
+				panic("Unsupported plan")
+			}
+			if err != nil {
+				return false
+			}
+
+			phyPlan.SetNextCallback(prev.Callback)
+			prev = phyPlan
+			return true
+		}))
+		return prev
+	}
 }

@@ -109,7 +109,8 @@ type TableReader interface {
 		projection []ColumnMatcher,
 		filter Expr,
 		distinctColumns []ColumnMatcher,
-		callback func(r arrow.Record) error,
+		// TODO change this to be some kind of struct or something?
+		callback func() func(r arrow.Record) error,
 	) error
 	SchemaIterator(
 		ctx context.Context,

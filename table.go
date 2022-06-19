@@ -277,7 +277,8 @@ func (t *Table) Iterator(
 	projections []logicalplan.ColumnMatcher,
 	filterExpr logicalplan.Expr,
 	distinctColumns []logicalplan.ColumnMatcher,
-	iterator func(r arrow.Record) error,
+	// TODO change this to be some kind of struct or something?
+	iteratable func() func(r arrow.Record) error,
 ) error {
 	filter, err := booleanExpr(filterExpr)
 	if err != nil {
@@ -322,6 +323,7 @@ func (t *Table) Iterator(
 	numWorkers := runtime.NumCPU()
 	rgChan := make(chan dynparquet.DynamicRowGroup, numWorkers+5) // TODO find the right number for backpressure
 	for i := 0; i < numWorkers; i++ {
+		iterator := iteratable()
 		eg.Go(func() error {
 			for rg := range rgChan {
 				var record arrow.Record
