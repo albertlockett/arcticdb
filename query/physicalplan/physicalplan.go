@@ -3,7 +3,6 @@ package physicalplan
 import (
 	"context"
 	"errors"
-
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/memory"
 
@@ -115,26 +114,23 @@ func (s *SchemaScan) Execute(ctx context.Context, pool memory.Allocator) error {
 
 func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) (*OutputPlan, error) {
 	outputPlan := &OutputPlan{}
-	var (
-		err      error
-		finisher = func() error { return nil }
-	)
+	//var err error
 
-	nextBuilder := planBuilder(pool, s, plan)
+	finisher, nextBuilder := planBuilder(pool, s, plan)
 	plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
 		switch {
 		case plan.SchemaScan != nil:
 			outputPlan.scan = &SchemaScan{
 				options:     plan.SchemaScan,
 				nextBuilder: nextBuilder,
-				finisher:    finisher,
+				finisher:    finisher.Finish,
 			}
 			return false
 		case plan.TableScan != nil:
 			outputPlan.scan = &TableScan{
 				options:     plan.TableScan,
 				nextBuilder: nextBuilder,
-				finisher:    finisher,
+				finisher:    finisher.Finish,
 			}
 			return false
 		case plan.Aggregation != nil:
@@ -151,16 +147,17 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 
 		return true
 	}))
-	return outputPlan, err
+	return outputPlan, nil
 }
 
 // planBuilder TODO a better name & some comments?
-func planBuilder(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) func() PhysicalPlan {
-	return func() PhysicalPlan {
+func planBuilder(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) (*Finisher, func() PhysicalPlan) {
+	finisher := Finisher{}
+
+	return &finisher, func() PhysicalPlan {
 		var (
-			err      error
-			prev     PhysicalPlan = &OutputPlan{} // ??
-			finisher              = func() error { return nil }
+			err  error
+			prev PhysicalPlan = &OutputPlan{} // ??
 		)
 		plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
 			var phyPlan PhysicalPlan
@@ -186,13 +183,7 @@ func planBuilder(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.
 				agg, err = Aggregate(pool, s, plan.Aggregation)
 				phyPlan = agg
 				if agg != nil {
-					prevFinisher := finisher
-					finisher = func() error {
-						if err := agg.Finish(); err != nil {
-							return err
-						}
-						return prevFinisher()
-					}
+					finisher.AddHashAgg(agg)
 				}
 			default:
 				panic("Unsupported plan")
