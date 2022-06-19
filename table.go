@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"math"
 	"math/rand"
@@ -317,25 +318,15 @@ func (t *Table) Iterator(
 	}
 
 	// convert the rowGroups to arrow records in parallel and then send call iterator
-	wg := sync.WaitGroup{}
-	numWorkers := runtime.NumCPU() - 1
-	if numWorkers <= 0 {
-		numWorkers = 1
-	}
+	eg, egCtx := errgroup.WithContext(ctx)
+	numWorkers := runtime.NumCPU()
 	rgChan := make(chan dynparquet.DynamicRowGroup, numWorkers+5) // TODO find the right number for backpressure
-	var workerErr error
 	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
+		eg.Go(func() error {
 			for rg := range rgChan {
-				// break if one of our workers got an error
-				if workerErr != nil {
-					break
-				}
-
 				var record arrow.Record
 				record, err = pqarrow.ParquetRowGroupToArrowRecord(
-					ctx,
+					egCtx,
 					pool,
 					rg,
 					projections,
@@ -343,18 +334,16 @@ func (t *Table) Iterator(
 					distinctColumns,
 				)
 				if err != nil {
-					workerErr = err
-					break
+					return err
 				}
 				err = iterator(record)
 				record.Release()
 				if err != nil {
-					workerErr = err
-					break
+					return err
 				}
 			}
-			wg.Done()
-		}()
+			return nil
+		})
 	}
 
 	// Previously we sorted all row groups into a single row group here,
@@ -372,11 +361,11 @@ func (t *Table) Iterator(
 		}
 	}
 	close(rgChan)
-	wg.Wait()
-
-	if workerErr != nil {
-		return workerErr
+	err = eg.Wait()
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 

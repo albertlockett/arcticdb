@@ -1,9 +1,5 @@
 package logicalplan
 
-import (
-	"runtime"
-)
-
 type Optimizer interface {
 	Optimize(plan *LogicalPlan) *LogicalPlan
 }
@@ -13,7 +9,6 @@ var DefaultOptimizers = []Optimizer{
 	&FilterPushDown{},
 	&DistinctPushDown{},
 	&ProjectionPushDown{},
-	&FilterExchange{},
 }
 
 // The PhysicalProjectionPushDown optimizer tries to push down the actual
@@ -156,36 +151,6 @@ func (p *FilterPushDown) optimize(plan *LogicalPlan, exprs []Expr) {
 		}
 	case plan.Filter != nil:
 		exprs = append(exprs, plan.Filter.Expr)
-	}
-
-	if plan.Input != nil {
-		p.optimize(plan.Input, exprs)
-	}
-}
-
-// The FilterExchange optimizer adds an exchange step to parallelize filtering
-// TODO more descriptive comments.
-type FilterExchange struct{}
-
-func (p *FilterExchange) Optimize(plan *LogicalPlan) *LogicalPlan {
-	p.optimize(plan, nil)
-	return plan
-}
-
-func (p *FilterExchange) optimize(plan *LogicalPlan, exprs []Expr) {
-	if plan.Filter != nil {
-		numWorkers := runtime.NumCPU() - 1
-		if numWorkers <= 0 {
-			numWorkers = 1
-		}
-		exchangePlan := LogicalPlan{
-			Exchange: &Exchange{
-				Parallelism:  numWorkers,
-				BackPressure: numWorkers * 2, // TODO profile the right number for backpressure
-			},
-			Input: plan.Input,
-		}
-		plan.Input = &exchangePlan
 	}
 
 	if plan.Input != nil {
