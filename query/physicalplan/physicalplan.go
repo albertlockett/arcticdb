@@ -116,7 +116,7 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 	outputPlan := &OutputPlan{}
 	//var err error
 
-	finisher, nextBuilder := planBuilder(pool, s, plan)
+	finisher, nextBuilder := planBuilder(pool, s, plan, outputPlan)
 	plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
 		switch {
 		case plan.SchemaScan != nil:
@@ -151,13 +151,18 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 }
 
 // planBuilder TODO a better name & some comments?
-func planBuilder(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) (*Finisher, func() PhysicalPlan) {
+func planBuilder(
+	pool memory.Allocator,
+	s *dynparquet.Schema,
+	plan *logicalplan.LogicalPlan,
+	outputPlan *OutputPlan,
+) (*Finisher, func() PhysicalPlan) {
 	finisher := Finisher{}
 
 	return &finisher, func() PhysicalPlan {
 		var (
 			err  error
-			prev PhysicalPlan = &OutputPlan{} // ??
+			prev PhysicalPlan = outputPlan
 		)
 		plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
 			var phyPlan PhysicalPlan
