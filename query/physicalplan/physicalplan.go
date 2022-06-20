@@ -157,7 +157,9 @@ func planBuilder(
 	plan *logicalplan.LogicalPlan,
 	outputPlan *OutputPlan,
 ) (*Finisher, func() PhysicalPlan) {
-	finisher := Finisher{}
+	finisher := Finisher{
+		pool: pool,
+	}
 
 	return &finisher, func() PhysicalPlan {
 		var (

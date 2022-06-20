@@ -3,10 +3,12 @@ package physicalplan
 import (
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/array"
+	"github.com/apache/arrow/go/v8/arrow/memory"
 	"sync"
 )
 
 type Finisher struct {
+	pool         memory.Allocator
 	mutex        sync.Mutex
 	aggregations []*HashAggregate
 }
@@ -40,7 +42,6 @@ func (f *Finisher) Finish() error {
 
 func (f *Finisher) combineRecords(records []arrow.Record) arrow.Record {
 	resultTree := make(map[interface{}]interface{})
-
 	for _, record := range records {
 		for i := 0; i < record.Column(0).Len(); i++ {
 			currTree := resultTree
@@ -80,7 +81,58 @@ func (f *Finisher) combineRecords(records []arrow.Record) arrow.Record {
 		}
 	}
 
-	return records[0]
+	resultBuilders := make([]array.Builder, 0)
+	for j := range records[0].Schema().Fields() {
+		col := records[0].Column(j)
+		resultBuilders = append(resultBuilders, array.NewBuilder(f.pool, col.DataType()))
+	}
+
+	tuple := make([]interface{}, 0)
+	numColumns := len(records[0].Schema().Fields())
+	numRows := 0
+	appendToRecord := func(tuple []interface{}) {
+		numRows++
+		for i, val := range tuple {
+			if bin, ok := resultBuilders[i].(*array.BinaryBuilder); ok {
+				bin.AppendString(val.(string))
+			}
+			if num, ok := resultBuilders[i].(*array.Int64Builder); ok {
+				num.Append(val.(int64))
+			}
+		}
+	}
+	combineCombine(tuple, numColumns, appendToRecord, resultTree)
+
+	cols := make([]arrow.Array, 0)
+	for _, builder := range resultBuilders {
+		cols = append(cols, builder.NewArray())
+	}
+	result := array.NewRecord(records[0].Schema(), cols, int64(numRows))
+	return result
+	//return records[0]
+}
+
+// TODO very messy
+func combineCombine(
+	tupleStack []interface{},
+	numColumns int, // TODO not strictly needed
+	callback func([]interface{}),
+	resultTree map[interface{}]interface{},
+) {
+	for key := range resultTree {
+		tupleStack = append(tupleStack, key) // push
+		if len(tupleStack) == numColumns {
+			// TODO this is weird ...
+			tupleStack = tupleStack[0 : len(tupleStack)-1]
+			tupleStack = append(tupleStack, resultTree["_val"])
+			callback(tupleStack)
+		} else {
+			nextTree := resultTree[key].(map[interface{}]interface{})
+			// TODO could panic if invalid tree passed?
+			combineCombine(tupleStack, numColumns, callback, nextTree)
+		}
+		tupleStack = tupleStack[0 : len(tupleStack)-1] // pop
+	}
 }
 
 func (f *Finisher) AddHashAgg(agg *HashAggregate) {
