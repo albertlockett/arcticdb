@@ -11,33 +11,39 @@ type HashAggregateFinisher struct {
 	aggregations []*HashAggregate
 }
 
+// Finish combines the aggregation results from multiple parallel execution threads into a single record and then
+// continues finishing by doing the callback. It assumes that each aggregation in it is finishing has the same
+// aggregation function and returns results with the same schema.
 func (f *HashAggregateFinisher) Finish() error {
-	// TODO is this a stupid way to check this?
-	if f.aggregations != nil && len(f.aggregations) > 0 {
-		callbackOriginal := f.aggregations[0].nextCallback
-		records := make([]arrow.Record, 0)
+	callbackOriginal := f.aggregations[0].nextCallback
+	records := make([]arrow.Record, 0)
 
-		appendToRecords := func(record arrow.Record) error {
+	// for each aggregation, call the finisher and add the aggregated record to the list of records
+	for _, agg := range f.aggregations {
+		agg.SetNextCallback(func(record arrow.Record) error {
 			records = append(records, record)
 			return nil
+		})
+		err := agg.Finish()
+		if err != nil {
+			return err
 		}
+	}
 
-		// TODO maybe we should make this a diff method
-		for _, agg := range f.aggregations {
-			agg.SetNextCallback(appendToRecords)
-			agg.Finish()
-		}
-
-		// TODO here we're gonna be combining hash aggregation results
-
-		combined := f.combineRecords(records)
-		callbackOriginal(combined)
+	combined := f.combineRecords(records)
+	err := callbackOriginal(combined)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
+// combineRecords combines the results from multiple aggregations into the single record which it retuns. It assumes
+// that all the records have the same schema.
+//
 func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Record {
-	// this method is building a
+	// create a list of builders for each column in the data set (based on the schema of the first record, as all should
+	// have the same schema)
 	resultBuilders := make([]array.Builder, 0)
 	for j := range records[0].Schema().Fields() {
 		col := records[0].Column(j)
@@ -45,31 +51,62 @@ func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Rec
 	}
 
 	mergeTree := f.buildMergeTree(records)
+
+	// traverse the merge tree and for each path (which is a tuple in our result set), add the values into each of the
+	// result builders
 	numRows := 0
-	f.traverseAndAggregate(mergeTree, make([]interface{}, 0), func(tuple []interface{}, array2 arrow.Array) {
+	f.traverseAndAggregate(mergeTree, make([]interface{}, 0), func(pathTuple []interface{}, array2 arrow.Array) {
 		numRows++
-		for i, val := range tuple {
+		for i, val := range pathTuple {
 			appendArrayVal(resultBuilders[i], val)
 		}
 
-		// aggregate the results ...
 		// we're assuming that are the aggregates here have basically the same aggregation function
-		aggArray, _ := f.aggregations[0].aggregationFunction.Aggregate(f.pool, []arrow.Array{array2})
+		aggFunc := f.aggregations[0].aggregationFunction
+
+		// aggregate the results from each parallel exeuction
+		aggArray, _ := aggFunc.Aggregate(f.pool, []arrow.Array{array2})
 		aggResultBuilder := resultBuilders[len(resultBuilders)-1]
 		appendArrayVal(aggResultBuilder, getArrayVal(aggArray, 0))
 	})
 
+	// combine our result builders into the list of columns
 	cols := make([]arrow.Array, 0)
 	for _, builder := range resultBuilders {
 		cols = append(cols, builder.NewArray())
 	}
+
+	// create and return the final result
 	result := array.NewRecord(records[0].Schema(), cols, int64(numRows))
 	return result
 }
 
+// buildMergeTree creates a tree where each level of the tree is a column in the result set, and the leaf nodes are
+// arrays values to be aggregated. For example the records:
+//
+// record1:
+// col1    ["a", "b"]
+// col2    ["c", "d"]
+// sum(c3) [ 1,   2 ]
+//
+// record2:
+// col1    ["a", "b"]
+// col2    ["c", "f"]
+// sum(c3) [ 1,   3 ]
+//
+//   root
+//  /    \
+// "a"   "b"__
+//  |     |   \
+// "c"   "d"  "f"
+//  |     |    |
+// [1,1] [2]  [3]
+//
 func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[interface{}]interface{} {
 	mergeTree := make(map[interface{}]interface{})
+	// for each record ...
 	for _, record := range records {
+		// for each row ...
 		for i := int64(0); i < record.NumRows(); i++ {
 			currTree := mergeTree
 			for colIndex, _ := range record.Schema().Fields() {
@@ -98,38 +135,41 @@ func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[inter
 	return mergeTree
 }
 
+// traverses the merge tree DFS and when it reaches a leaf node, calls the callback.
 func (f *HashAggregateFinisher) traverseAndAggregate(
 	mergeTree map[interface{}]interface{},
-	tupleStack []interface{},
+	pathStack []interface{},
 	callback func([]interface{}, arrow.Array),
 ) {
 	for key := range mergeTree {
-		tupleStack = append(tupleStack, key) // push
+		pathStack = append(pathStack, key) // push path element ot stack
 		nextTree, ok := mergeTree[key].(map[interface{}]interface{})
 		if ok {
-			f.traverseAndAggregate(nextTree, tupleStack, callback)
+			f.traverseAndAggregate(nextTree, pathStack, callback)
 		} else {
-			arrayBuilder := mergeTree[key].(array.Builder) // TODO check here and panic?
-			callback(tupleStack, arrayBuilder.NewArray())
+			arrayBuilder := mergeTree[key].(array.Builder)
+			callback(pathStack, arrayBuilder.NewArray())
 		}
-		tupleStack = tupleStack[0 : len(tupleStack)-1] // pop
+		pathStack = pathStack[0 : len(pathStack)-1] // pop
 
 	}
 }
 
+// getArrayVal is a helper method of getting the value at some column out of the arrow array
 func getArrayVal(col arrow.Array, i int) interface{} {
 	bin, ok := col.(*array.Binary)
 	if ok {
-		return bin.ValueString(int(i))
+		return bin.ValueString(i)
 	}
 
 	num, isNum := col.(*array.Int64)
 	if isNum {
-		return num.Value(int(i))
+		return num.Value(i)
 	}
 	return nil
 }
 
+// appendArrayVal is a helper function for appending the value into the arrow array
 func appendArrayVal(arrayBuilder array.Builder, val interface{}) {
 	if bin, ok := arrayBuilder.(*array.BinaryBuilder); ok {
 		bin.AppendString(val.(string))
