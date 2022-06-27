@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
@@ -319,8 +320,8 @@ func (t *Table) Iterator(
 
 	// convert the rowGroups to arrow records in parallel and then send call iterator
 	eg, egCtx := errgroup.WithContext(ctx)
-	numWorkers := 2                                               // runtime.NumCPU()
-	rgChan := make(chan dynparquet.DynamicRowGroup, numWorkers+5) // TODO find the right number for backpressure
+	numWorkers := runtime.NumCPU()
+	rgChan := make(chan dynparquet.DynamicRowGroup) //, numWorkers) // TODO find the right number for backpressure
 	for i := 0; i < numWorkers; i++ {
 		iterator := iteratable()
 		eg.Go(func() error {
@@ -355,10 +356,10 @@ func (t *Table) Iterator(
 	for _, rg := range rowGroups {
 		select {
 		case <-ctx.Done():
-			close(rgChan)
 			return ctx.Err()
-		default:
-			rgChan <- rg
+		case rgChan <- rg:
+		case <-egCtx.Done():
+			break
 		}
 	}
 	close(rgChan)
