@@ -19,7 +19,8 @@ func (f *HashAggregateFinisher) Finish() error {
 	callbackOriginal := f.aggregations[0].nextCallback
 	records := make([]arrow.Record, 0)
 
-	// for each aggregation, call the finisher and add the aggregated record to the list of records
+	// for each aggregation, call the finisher and add the aggregated record to
+	// the list of records
 	for _, agg := range f.aggregations {
 		agg.SetNextCallback(func(record arrow.Record) error {
 			records = append(records, record)
@@ -39,13 +40,13 @@ func (f *HashAggregateFinisher) Finish() error {
 	return nil
 }
 
-// combineRecords combines the results from multiple aggregations into the single record which it retuns. It assumes
-// that all the records have the same schema where the order of columns can differ but the column being aggregated is
-// the last column.
-//
+// combineRecords combines the results from multiple aggregations into the
+// single record which it retuns. It assumes that all the records have the same
+// schema where the order of columns can differ but the column being aggregated
+// is the last column.
 func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Record {
-	// create a list of builders for each column in the data set (based on the schema of the first record, as all should
-	// have the same schema)
+	// create a list of builders for each column in the data set (based on the
+	// schema of the first record, as all should have the same schema)
 	resultBuilders := make([]array.Builder, 0)
 	for j := range records[0].Schema().Fields() {
 		col := records[0].Column(j)
@@ -54,8 +55,8 @@ func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Rec
 
 	mergeTree := f.buildMergeTree(records)
 
-	// traverse the merge tree and for each path (which is a tuple in our result set), add the values into each of the
-	// result builders
+	// traverse the merge tree and for each path (which is a tuple in our result
+	// set), add the values into each of the result builders
 	numRows := 0
 	f.traverseAndAggregate(mergeTree, make([]interface{}, 0), func(pathTuple []interface{}, array2 arrow.Array) {
 		numRows++
@@ -83,8 +84,9 @@ func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Rec
 	return result
 }
 
-// buildMergeTree creates a tree where each level of the tree is a column in the result set, and the leaf nodes are
-// arrays values to be aggregated. For example the records:
+// buildMergeTree creates a tree where each level of the tree is a column in
+// the result set, and the leaf nodes are arrays values to be aggregated. For
+// example the records:
 //
 // record1:
 // col1    ["a", "b"]
@@ -112,8 +114,9 @@ func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[inter
 		for i := int64(0); i < record.NumRows(); i++ {
 			currTree := mergeTree
 			for colIndex := range record.Schema().Fields() {
-				// must ensure that the same field is added at the same level of the tree, but the records columns can be in
-				// different orders, so use records[0] as a reference for the order
+				// must ensure that the same field is added at the same level of the
+				// tree, but the records columns can be in different orders, so use
+				// records[0] as a reference for the order
 				fieldName := records[0].Schema().Fields()[colIndex].Name
 
 				col := columnForName(fieldName, record)
@@ -141,7 +144,7 @@ func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[inter
 	return mergeTree
 }
 
-// columnForName returns the column from the record for the field with the passed name.
+// columnForName returns the column from the record for the field with the name.
 func columnForName(name string, record arrow.Record) arrow.Array {
 	for columnIndex, field := range record.Schema().Fields() {
 		if field.Name == name {
@@ -151,7 +154,8 @@ func columnForName(name string, record arrow.Record) arrow.Array {
 	return nil
 }
 
-// traverses the merge tree DFS and when it reaches a leaf node, calls the callback.
+// traverseAndAggregate traverses the merge tree DFS and when it reaches a leaf
+// node calls callback.
 func (f *HashAggregateFinisher) traverseAndAggregate(
 	mergeTree map[interface{}]interface{},
 	pathStack []interface{},
@@ -170,7 +174,8 @@ func (f *HashAggregateFinisher) traverseAndAggregate(
 	}
 }
 
-// getArrayVal is a helper method of getting the value at some column out of the arrow array.
+// getArrayVal is a helper method of getting the value at some column out of the
+// arrow array.
 func getArrayVal(col arrow.Array, i int) interface{} {
 	bin, ok := col.(*array.Binary)
 	if ok {

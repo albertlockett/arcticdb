@@ -88,10 +88,11 @@ func (d *Distinction) Callback(r arrow.Record) error {
 			continue
 		}
 		d.mtx.RUnlock()
-
 		// ... otherwise add value to result
+
 		d.mtx.Lock()
-		// double check that no other thread set the value in between when we held the read and write locks
+		// double check that no other thread set the value in between when we held
+		// the read and write locks
 		if _, ok := d.seen[hash]; ok {
 			d.mtx.Unlock()
 			continue
