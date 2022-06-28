@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/memory"
+	"sync"
 
 	"github.com/polarsignals/arcticdb/dynparquet"
 	"github.com/polarsignals/arcticdb/query/logicalplan"
@@ -57,6 +58,14 @@ func (e *OutputPlan) Execute(ctx context.Context, pool memory.Allocator, callbac
 	return e.scan.Execute(ctx, pool)
 }
 
+type IteratorProvider struct {
+	scan *TableScan
+}
+
+func (p *IteratorProvider) Iterator() func(record arrow.Record) error {
+	return p.scan.nextBuilder().Callback
+}
+
 type TableScan struct {
 	options     *logicalplan.TableScan
 	nextBuilder func() PhysicalPlan
@@ -74,10 +83,7 @@ func (s *TableScan) Execute(ctx context.Context, pool memory.Allocator) error {
 		s.options.Projection,
 		s.options.Filter,
 		s.options.Distinct,
-		// TODO change this to return whatever struct table iterator expects
-		func() func(record arrow.Record) error {
-			return s.nextBuilder().Callback
-		},
+		&IteratorProvider{scan: s},
 	)
 	if err != nil {
 		return err
@@ -161,6 +167,11 @@ func planBuilder(
 		pool: pool,
 	}
 
+	// instances of distinct are not shared across threads so that multiple instances do not have to syncrhonize which
+	// distinct values they have seen. we'll only create one instance of the phy plan distinct per logical plan
+	disticts := make(map[*logicalplan.Distinct]*Distinction)
+	distintsLock := sync.Mutex{}
+
 	return &finisher, func() PhysicalPlan {
 		var (
 			err  error
@@ -176,12 +187,18 @@ func planBuilder(
 			case plan.Projection != nil:
 				phyPlan, err = Project(pool, plan.Projection.Exprs)
 			case plan.Distinct != nil:
-				matchers := make([]logicalplan.ColumnMatcher, 0, len(plan.Distinct.Columns))
-				for _, col := range plan.Distinct.Columns {
-					matchers = append(matchers, col.Matcher())
+				distintsLock.Lock()
+				defer distintsLock.Unlock()
+				// if the distinct instance for the logical plan has not been insantiated, do it now
+				if _, ok := disticts[plan.Distinct]; !ok {
+					matchers := make([]logicalplan.ColumnMatcher, 0, len(plan.Distinct.Columns))
+					for _, col := range plan.Distinct.Columns {
+						matchers = append(matchers, col.Matcher())
+					}
+					disticts[plan.Distinct] = Distinct(pool, matchers)
 				}
-
-				phyPlan = Distinct(pool, matchers)
+				// use same distinct in all threads
+				phyPlan = disticts[plan.Distinct]
 			case plan.Filter != nil:
 				phyPlan, err = Filter(pool, plan.Filter.Expr)
 

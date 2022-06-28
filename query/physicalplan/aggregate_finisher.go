@@ -39,7 +39,8 @@ func (f *HashAggregateFinisher) Finish() error {
 }
 
 // combineRecords combines the results from multiple aggregations into the single record which it retuns. It assumes
-// that all the records have the same schema.
+// that all the records have the same schema where the order of columns can differ but the column being aggregated is
+// the last column.
 //
 func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Record {
 	// create a list of builders for each column in the data set (based on the schema of the first record, as all should
@@ -109,9 +110,13 @@ func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[inter
 		// for each row ...
 		for i := int64(0); i < record.NumRows(); i++ {
 			currTree := mergeTree
-			for colIndex, _ := range record.Schema().Fields() {
-				col := record.Column(colIndex)
-				key := getArrayVal(col, int(i)) // TODO null check
+			for colIndex := range record.Schema().Fields() {
+				// must ensure that the same field is added at the same level of the tree, but the records columns can be in
+				// different orders, so use records[0] as a reference for the order
+				fieldName := records[0].Schema().Fields()[colIndex].Name
+
+				col := columnForName(fieldName, record)
+				key := getArrayVal(col, int(i))
 
 				if colIndex < len(record.Schema().Fields())-2 {
 					// here we're extending the tree
@@ -126,13 +131,23 @@ func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[inter
 						currTree[key] = array.NewBuilder(f.pool, aggCol.DataType())
 					}
 					arrayList := currTree[key].(array.Builder)
-					appendArrayVal(arrayList, getArrayVal(aggCol, int(i))) // TODO null check?
+					appendArrayVal(arrayList, getArrayVal(aggCol, int(i)))
 					break
 				}
 			}
 		}
 	}
 	return mergeTree
+}
+
+// columnForName returns the column from the record for the field with the passed name.
+func columnForName(name string, record arrow.Record) arrow.Array {
+	for columnIndex, field := range record.Schema().Fields() {
+		if field.Name == name {
+			return record.Column(columnIndex)
+		}
+	}
+	return nil
 }
 
 // traverses the merge tree DFS and when it reaches a leaf node, calls the callback.

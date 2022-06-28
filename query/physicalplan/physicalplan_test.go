@@ -27,7 +27,7 @@ func (m *mockTableReader) Iterator(
 	projection []logicalplan.ColumnMatcher,
 	filter logicalplan.Expr,
 	distinctColumns []logicalplan.ColumnMatcher,
-	callback func(r arrow.Record) error,
+	callback func() func(r arrow.Record) error,
 ) error {
 	return nil
 }
