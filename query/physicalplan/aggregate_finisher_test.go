@@ -2,13 +2,15 @@ package physicalplan
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/array"
 	"github.com/apache/arrow/go/v8/arrow/memory"
+	"github.com/stretchr/testify/require"
+
 	"github.com/polarsignals/arcticdb/dynparquet"
 	"github.com/polarsignals/arcticdb/query/logicalplan"
-	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestCombineAggregateResults(t *testing.T) {

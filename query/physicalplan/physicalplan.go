@@ -3,9 +3,10 @@ package physicalplan
 import (
 	"context"
 	"errors"
+	"sync"
+
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/memory"
-	"sync"
 
 	"github.com/polarsignals/arcticdb/dynparquet"
 	"github.com/polarsignals/arcticdb/query/logicalplan"
@@ -120,9 +121,8 @@ func (s *SchemaScan) Execute(ctx context.Context, pool memory.Allocator) error {
 
 func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.LogicalPlan) (*OutputPlan, error) {
 	outputPlan := &OutputPlan{}
-	//var err error
 
-	finisher, nextBuilder := planBuilder(pool, s, plan, outputPlan)
+	finisher, nextBuilder := nextIteratorBuilder(pool, s, plan, outputPlan)
 	plan.Accept(PrePlanVisitorFunc(func(plan *logicalplan.LogicalPlan) bool {
 		switch {
 		case plan.SchemaScan != nil:
@@ -156,8 +156,12 @@ func Build(pool memory.Allocator, s *dynparquet.Schema, plan *logicalplan.Logica
 	return outputPlan, nil
 }
 
-// planBuilder TODO a better name & some comments?
-func planBuilder(
+// nextIteratorBuilder returns a function that when called will build the part
+// of the physical plan that will iterate the arrow records as well as the
+// finisher which can be used to join results of the query. The builder
+// function can be called in multiple threads to parallelize query execution
+// from the scan step onward.
+func nextIteratorBuilder(
 	pool memory.Allocator,
 	s *dynparquet.Schema,
 	plan *logicalplan.LogicalPlan,
@@ -167,8 +171,9 @@ func planBuilder(
 		pool: pool,
 	}
 
-	// instances of distinct are not shared across threads so that multiple instances do not have to syncrhonize which
-	// distinct values they have seen. we'll only create one instance of the phy plan distinct per logical plan
+	// instances of distinct are not shared across threads so that multiple
+	// instances do not have to syncrhonize which distinct values they have seen.
+	// we'll only create one instance of the phy plan distinct per logical plan
 	disticts := make(map[*logicalplan.Distinct]*Distinction)
 	distintsLock := sync.Mutex{}
 
@@ -189,7 +194,8 @@ func planBuilder(
 			case plan.Distinct != nil:
 				distintsLock.Lock()
 				defer distintsLock.Unlock()
-				// if the distinct instance for the logical plan has not been insantiated, do it now
+				// if the distinct instance for the logical plan has not been
+				// insantiated, do it now
 				if _, ok := disticts[plan.Distinct]; !ok {
 					matchers := make([]logicalplan.ColumnMatcher, 0, len(plan.Distinct.Columns))
 					for _, col := range plan.Distinct.Columns {

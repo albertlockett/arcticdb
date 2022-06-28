@@ -1,8 +1,9 @@
 package physicalplan
 
 import (
-	"github.com/apache/arrow/go/v8/arrow/memory"
 	"sync"
+
+	"github.com/apache/arrow/go/v8/arrow/memory"
 )
 
 type Finisher struct {
@@ -15,7 +16,10 @@ type Finisher struct {
 
 func (f *Finisher) Finish() error {
 	if f.aggregation != nil {
-		f.aggregation.Finish()
+		err := f.aggregation.Finish()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

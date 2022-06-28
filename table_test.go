@@ -29,6 +29,14 @@ type testOutput struct {
 	t *testing.T
 }
 
+type tIteratorProvider struct {
+	callback func(arrow.Record) error
+}
+
+func (p *tIteratorProvider) Iterator() func(arrow.Record) error {
+	return p.callback
+}
+
 func (l *testOutput) Write(p []byte) (n int, err error) {
 	l.t.Log(string(p))
 	return len(p), nil
@@ -152,11 +160,12 @@ func TestTable(t *testing.T) {
 	_, err = table.InsertBuffer(context.Background(), buf)
 	require.NoError(t, err)
 
-	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
-		t.Log(ar)
-		defer ar.Release()
-
-		return nil
+	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{
+		callback: func(ar arrow.Record) error {
+			t.Log(ar)
+			defer ar.Release()
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -283,11 +292,11 @@ func Test_Table_GranuleSplit(t *testing.T) {
 			return false
 		})
 	}
-	table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(r arrow.Record) error {
+	table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(r arrow.Record) error {
 		defer r.Release()
 		t.Log(r)
 		return nil
-	})
+	}})
 
 	require.Equal(t, 2, table.active.Index().Len())
 	require.Equal(t, uint64(2), table.active.Index().Min().(*Granule).metadata.card.Load())
@@ -423,11 +432,11 @@ func Test_Table_InsertLowest(t *testing.T) {
 	// Wait for the index to be updated by the asynchronous granule split.
 	table.Sync()
 
-	table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(r arrow.Record) error {
+	table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(r arrow.Record) error {
 		defer r.Release()
 		t.Log(r)
 		return nil
-	})
+	}})
 
 	require.Equal(t, 2, table.active.Index().Len())
 	require.Equal(t, uint64(3), table.active.Index().Min().(*Granule).metadata.card.Load()) // [14,13,12]
@@ -514,14 +523,14 @@ func Test_Table_Concurrency(t *testing.T) {
 
 			m := sync.Mutex{}
 			totalrows := int64(0)
-			err := table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+			err := table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 				m.Lock()
 				totalrows += ar.NumRows()
 				m.Unlock()
 				defer ar.Release()
 
 				return nil
-			})
+			}})
 			require.NoError(t, err)
 			require.Equal(t, int64(n*inserts*rows), totalrows)
 		})
@@ -690,12 +699,12 @@ func Test_Table_ReadIsolation(t *testing.T) {
 	table.db.highWatermark.Store(1)
 
 	rows := int64(0)
-	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 		rows += ar.NumRows()
 		defer ar.Release()
 
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.Equal(t, int64(3), rows)
 
@@ -704,12 +713,12 @@ func Test_Table_ReadIsolation(t *testing.T) {
 	table.db.highWatermark.Store(2)
 
 	rows = int64(0)
-	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 		rows += ar.NumRows()
 		defer ar.Release()
 
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.Equal(t, int64(4), rows)
 }
@@ -1017,13 +1026,13 @@ func Test_Table_Filter(t *testing.T) {
 	)
 
 	iterated := false
-	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, filterExpr, nil, func(ar arrow.Record) error {
+	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, filterExpr, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 		defer ar.Release()
 
 		iterated = true
 
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.False(t, iterated)
 }
@@ -1111,12 +1120,12 @@ func Test_Table_InsertCancellation(t *testing.T) {
 			}
 
 			totalrows := int64(0)
-			err := table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+			err := table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 				totalrows += ar.NumRows()
 				defer ar.Release()
 
 				return nil
-			})
+			}})
 			require.NoError(t, err)
 			require.Less(t, totalrows, int64(n*inserts*rows)) // We expect to cancel some subset of our writes
 		})
@@ -1175,12 +1184,12 @@ func Test_Table_CancelBasic(t *testing.T) {
 	require.True(t, errors.Is(err, context.Canceled))
 
 	totalrows := int64(0)
-	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, func(ar arrow.Record) error {
+	err = table.Iterator(context.Background(), memory.NewGoAllocator(), nil, nil, nil, &tIteratorProvider{callback: func(ar arrow.Record) error {
 		totalrows += ar.NumRows()
 		defer ar.Release()
 
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.Equal(t, int64(0), totalrows)
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"math"
 	"math/rand"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/apache/arrow/go/v8/arrow"
 	"github.com/apache/arrow/go/v8/arrow/array"

@@ -113,7 +113,6 @@ type TableReader interface {
 		projection []ColumnMatcher,
 		filter Expr,
 		distinctColumns []ColumnMatcher,
-		// TODO change this to be some kind of struct or something?
 		callback IteratorProvider,
 	) error
 	SchemaIterator(

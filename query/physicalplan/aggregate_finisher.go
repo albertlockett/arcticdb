@@ -11,8 +11,9 @@ type HashAggregateFinisher struct {
 	aggregations []*HashAggregate
 }
 
-// Finish combines the aggregation results from multiple parallel execution threads into a single record and then
-// continues finishing by doing the callback. It assumes that each aggregation in it is finishing has the same
+// Finish combines the aggregation results from multiple parallel execution
+// threads into a single record and then continues finishing by doing the
+// callback. It assumes that each aggregation in it is finishing has the same
 // aggregation function and returns results with the same schema.
 func (f *HashAggregateFinisher) Finish() error {
 	callbackOriginal := f.aggregations[0].nextCallback
@@ -62,7 +63,7 @@ func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Rec
 			appendArrayVal(resultBuilders[i], val)
 		}
 
-		// we're assuming that are the aggregates here have basically the same aggregation function
+		// we're assuming that are the aggregates here have the same aggregation function
 		aggFunc := f.aggregations[0].aggregationFunction
 
 		// aggregate the results from each parallel exeuction
@@ -101,7 +102,7 @@ func (f *HashAggregateFinisher) combineRecords(records []arrow.Record) arrow.Rec
 //  |     |   \
 // "c"   "d"  "f"
 //  |     |    |
-// [1,1] [2]  [3]
+// [1,1] [2]  [3].
 //
 func (f *HashAggregateFinisher) buildMergeTree(records []arrow.Record) map[interface{}]interface{} {
 	mergeTree := make(map[interface{}]interface{})
@@ -166,11 +167,10 @@ func (f *HashAggregateFinisher) traverseAndAggregate(
 			callback(pathStack, arrayBuilder.NewArray())
 		}
 		pathStack = pathStack[0 : len(pathStack)-1] // pop
-
 	}
 }
 
-// getArrayVal is a helper method of getting the value at some column out of the arrow array
+// getArrayVal is a helper method of getting the value at some column out of the arrow array.
 func getArrayVal(col arrow.Array, i int) interface{} {
 	bin, ok := col.(*array.Binary)
 	if ok {
@@ -184,7 +184,7 @@ func getArrayVal(col arrow.Array, i int) interface{} {
 	return nil
 }
 
-// appendArrayVal is a helper function for appending the value into the arrow array
+// appendArrayVal is a helper function for appending the value into the arrow array.
 func appendArrayVal(arrayBuilder array.Builder, val interface{}) {
 	if bin, ok := arrayBuilder.(*array.BinaryBuilder); ok {
 		bin.AppendString(val.(string))
