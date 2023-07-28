@@ -33,8 +33,6 @@ func main() {
 	pprof.StartCPUProfile(f)
 	defer pprof.StopCPUProfile()
 
-	execBashScript()
-
 	logger := log.NewLogfmtLogger(os.Stderr)
 	logger = level.NewFilter(logger,
 		level.AllowInfo(),
@@ -45,7 +43,7 @@ func main() {
 	// Create a new column store
 	columnstore, err := frostdb.New(
 		frostdb.WithLogger(logger),
-		frostdb.WithStoragePath("/Users/albertlockett/Development/arcticdb/tmp"),
+		frostdb.WithStoragePath("/home/albertlockett/Development/arcticdb/tmp/"),
 		frostdb.WithWAL(),
 	)
 	if err != nil {
@@ -58,8 +56,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	// execBashScript()
 
 	// Define our simple schema of labels and values
 	// schema := simpleSchema()
@@ -81,11 +77,14 @@ func main() {
 	// 	// _, _ :=
 	// 	table.Write(context.Background(), record)
 	// }
+
+	execBashScript()
+
 }
 
 func execBashScript() {
 	thisPid := os.Getpid()
-	cmd := exec.Command("/Users/albertlockett/Development/arcticdb/test_main/cpu_time.sh", fmt.Sprintf("%d", thisPid))
+	cmd := exec.Command("/home/albertlockett/Development/arcticdb/test_main/cpu_time.sh", fmt.Sprintf("%d", thisPid))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
