@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apache/arrow/go/v13/arrow"
 	"github.com/apache/arrow/go/v13/arrow/ipc"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -596,11 +597,35 @@ func (db *DB) recover(ctx context.Context, wal WAL) error {
 		return err
 	}
 
-	if err := wal.Replay(snapshotTx, func(tx uint64, record *walpb.Record) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	recordWg := sync.WaitGroup{}
+	insertWg := sync.WaitGroup{}
+
+	type recordHandlerArgs struct {
+		tx     uint64
+		record *walpb.Record
+	}
+	recordChan := make(chan recordHandlerArgs)
+
+	type insertHandlerArgs struct {
+		tx     uint64
+		table  *Table
+		record arrow.Record
+	}
+	insertRecordChan := make(chan insertHandlerArgs)
+
+	insertHandler := func(args insertHandlerArgs) error {
+		table := args.table
+		record := args.record
+		tx := args.tx
+		if err := table.active.InsertRecord(ctx, tx, record); err != nil {
+			return fmt.Errorf("insert record into block: %w", err)
 		}
-		lastTx = tx
+		return nil
+	}
+
+	recordHandler := func(args recordHandlerArgs) error {
+		record := args.record
+		tx := args.tx
 		switch e := record.Entry.EntryType.(type) {
 		case *walpb.Entry_NewTableBlock_:
 			entry := e.NewTableBlock
@@ -725,9 +750,15 @@ func (db *DB) recover(ctx context.Context, wal WAL) error {
 					return fmt.Errorf("read record: %w", err)
 				}
 
-				if err := table.active.InsertRecord(ctx, tx, record); err != nil {
-					return fmt.Errorf("insert record into block: %w", err)
+				insertRecordChan <- insertHandlerArgs{
+					tx,
+					table,
+					record,
 				}
+
+				// if err := table.active.InsertRecord(ctx, tx, record); err != nil {
+				// 	return fmt.Errorf("insert record into block: %w", err)
+				// }
 			default:
 				serBuf, err := dynparquet.ReaderFromBytes(entry.Data)
 				if err != nil {
@@ -751,7 +782,57 @@ func (db *DB) recover(ctx context.Context, wal WAL) error {
 			return fmt.Errorf("unexpected WAL entry type: %t", e)
 		}
 		return nil
-	}); err != nil {
+	}
+
+	for i := 0; i < 16; i++ {
+		recordWg.Add(1)
+
+		go func() {
+			for record := range recordChan {
+				if err := recordHandler(record); err != nil {
+					level.Error(db.logger).Log(
+						"msg", "error replaying WAL record",
+						"err", err,
+					)
+				}
+			}
+			recordWg.Done()
+		}()
+	}
+	for i := 0; i < 16; i++ {
+
+		insertWg.Add(1)
+		go func() {
+			for record := range insertRecordChan {
+				if err := insertHandler(record); err != nil {
+					level.Error(db.logger).Log(
+						"msg", "error inserting record into block",
+						"err", err,
+					)
+				}
+			}
+			insertWg.Done()
+		}()
+	}
+
+	err = wal.Replay(snapshotTx, func(tx uint64, record *walpb.Record) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		lastTx = tx
+
+		recordChan <- recordHandlerArgs{
+			tx,
+			record,
+		}
+		return nil
+	})
+	close(recordChan)
+	recordWg.Wait()
+	close(insertRecordChan)
+	insertWg.Wait()
+
+	if err != nil {
 		return err
 	}
 
