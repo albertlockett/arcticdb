@@ -52,31 +52,31 @@ func main() {
 	defer columnstore.Close()
 
 	// Open up a database in the column store
-	_, err = columnstore.DB(context.Background(), "simple_db")
+	database, err := columnstore.DB(context.Background(), "simple_db")
 	if err != nil {
 		panic(err)
 	}
 
 	// Define our simple schema of labels and values
-	// schema := simpleSchema()
+	schema := simpleSchema()
 
-	// // Create a table named simple in our database
-	// table, _ := database.Table(
-	// 	"simple_table",
-	// 	frostdb.NewTableConfig(schema),
-	// )
+	// Create a table named simple in our database
+	table, _ := database.Table(
+		"simple_table",
+		frostdb.NewTableConfig(schema),
+	)
 
-	// for i := 0; i < 100000; i++ {
-	// 	record := Simple{
-	// 		Names: FirstLast{
-	// 			FirstName: "Albert",
-	// 			Surname:   "Lockett",
-	// 		},
-	// 		Value: 99,
-	// 	}
-	// 	// _, _ :=
-	// 	table.Write(context.Background(), record)
-	// }
+	for i := 0; i < 5000; i++ {
+		record := Simple{
+			Names: FirstLast{
+				FirstName: "Albert",
+				Surname:   "Lockett",
+			},
+			Value: 99,
+		}
+		// _, _ :=
+		table.Write(context.Background(), record)
+	}
 
 	execBashScript()
 

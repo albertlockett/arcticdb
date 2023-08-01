@@ -784,7 +784,7 @@ func (db *DB) recover(ctx context.Context, wal WAL) error {
 		return nil
 	}
 
-	for i := 0; i < 16; i++ {
+	for i := 0; i < 4; i++ {
 		recordWg.Add(1)
 
 		go func() {
@@ -799,7 +799,7 @@ func (db *DB) recover(ctx context.Context, wal WAL) error {
 			recordWg.Done()
 		}()
 	}
-	for i := 0; i < 16; i++ {
+	for i := 0; i < 4; i++ {
 
 		insertWg.Add(1)
 		go func() {

@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/polarsignals/frostdb/test_main
+cpu: 11th Gen Intel(R) Core(TM) i7-11370H @ 3.30GHz
+BenchmarkReplay2-8   	       1	2102986972 ns/op
+BenchmarkReplay2-8   	       1	2223648905 ns/op
+BenchmarkReplay2-8   	       1	1450033888 ns/op
+BenchmarkReplay2-8   	       1	1503663090 ns/op
+BenchmarkReplay2-8   	       1	1446165822 ns/op
+BenchmarkReplay2-8   	       1	1444786041 ns/op
+BenchmarkReplay2-8   	       1	1540757451 ns/op
+BenchmarkReplay2-8   	       1	1270320113 ns/op
+BenchmarkReplay2-8   	       1	1357068242 ns/op
+BenchmarkReplay2-8   	       1	1359632432 ns/op
+PASS
+ok  	github.com/polarsignals/frostdb/test_main	15.897s
